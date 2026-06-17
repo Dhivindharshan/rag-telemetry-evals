@@ -1,0 +1,9 @@
+MLOps combines Machine Learning, DevOps, and Data Engineering.
+
+RAG systems retrieve relevant documents before generating answers.
+
+MLflow helps track machine learning experiments.
+
+Vector databases store embeddings for semantic search.
+
+Telemetry helps monitor latency, token usage, and system performance.

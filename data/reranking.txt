@@ -1,0 +1,44 @@
+Reranking in RAG Pipelines
+
+Reranking is a second-stage retrieval step that refines the ordering of candidate chunks returned by the initial vector search. While the retriever uses a bi-encoder to quickly identify a candidate set, the reranker uses a cross-encoder to produce more accurate relevance scores for each (query, chunk) pair.
+
+Why Reranking Improves Quality
+
+Bi-encoders encode the query and each document independently. The query vector and document vector are compared using cosine similarity or L2 distance, which is fast but limited: the two texts never attend to each other, so subtle relevance signals are missed.
+
+Cross-encoders take the query and document as a single concatenated input and compute a relevance score through full bidirectional attention. This allows the model to identify fine-grained semantic connections that are invisible to independent embeddings. The tradeoff is speed: cross-encoders are 10–100x slower than bi-encoders, making them impractical for searching millions of documents but ideal for scoring a small candidate set of 10–50 chunks.
+
+The Two-Stage Retrieval Pattern
+
+A standard reranking pipeline uses two stages:
+
+Stage 1 — Bi-encoder retrieval: retrieve the top-N candidates quickly using vector similarity. N is typically 10–50, much larger than the final top-k the LLM will receive.
+
+Stage 2 — Cross-encoder reranking: score each of the N candidates with a cross-encoder. Sort by score descending and keep the top-k for the LLM context.
+
+This pattern combines the scalability of approximate nearest-neighbor search with the accuracy of cross-encoder scoring.
+
+Cross-Encoder Models
+
+The sentence-transformers library provides pre-trained cross-encoder models optimized for passage relevance scoring:
+
+- cross-encoder/ms-marco-MiniLM-L-6-v2: fast and accurate, trained on the MS MARCO passage ranking dataset. Produces a scalar relevance score for each (query, passage) pair.
+- cross-encoder/ms-marco-MiniLM-L-12-v2: higher quality than the L-6 variant at the cost of approximately 2x inference time.
+- cross-encoder/nli-deberta-v3-small: trained on natural language inference data, useful when relevance maps to entailment.
+
+Usage in Python
+
+    from sentence_transformers.cross_encoder import CrossEncoder
+    model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    pairs = [(query, chunk) for chunk in candidate_chunks]
+    scores = model.predict(pairs)
+
+The predict() method returns a numpy array of relevance scores. Higher scores indicate higher relevance. The chunks can then be sorted in descending order by score.
+
+Reranking and top_n
+
+After reranking, the top_n parameter controls how many of the reranked chunks are passed to the LLM. A common setup is to retrieve top-10 with the bi-encoder and keep top-3 after reranking. This ensures the LLM receives the most relevant context while retrieval recall remains high.
+
+Impact on RAG Performance
+
+Studies on RAG benchmarks consistently show that adding a reranking step improves end-to-end answer quality by surfacing higher-quality context for the LLM. The improvement is largest when the query is ambiguous or when the corpus contains many topically similar but factually distinct passages.

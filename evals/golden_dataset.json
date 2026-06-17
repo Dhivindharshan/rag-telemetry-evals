@@ -1,0 +1,139 @@
+[
+  {
+    "query": "What is MLOps?",
+    "relevant_chunk_ids": [
+      "test.txt_chunk_0",
+      "mlops.txt_chunk_0",
+      "mlops.txt_chunk_1",
+      "mlops.txt_chunk_5",
+      "mlops.txt_chunk_6"
+    ],
+    "expected_keywords": ["MLOps", "machine learning", "DevOps", "production", "lifecycle", "deployment", "monitoring"],
+    "reference": "MLOps (Machine Learning Operations) is a set of practices that combines machine learning, DevOps, and data engineering to standardize and streamline the lifecycle of machine learning models in production. It covers the end-to-end process of building, deploying, monitoring, and maintaining ML models reliably and efficiently."
+  },
+  {
+    "query": "How does retrieval-augmented generation work?",
+    "relevant_chunk_ids": [
+      "rag.txt_chunk_0",
+      "rag.txt_chunk_3",
+      "rag.txt_chunk_4"
+    ],
+    "expected_keywords": ["retrieval", "documents", "chunks", "context", "LLM", "similarity", "knowledge base", "generate"],
+    "reference": "Retrieval-Augmented Generation (RAG) works by first retrieving relevant documents or chunks from a knowledge base using a similarity search, then passing those retrieved chunks as context alongside the user query to a large language model. The LLM generates an answer grounded in the retrieved context rather than relying solely on its parametric knowledge."
+  },
+  {
+    "query": "What is ChromaDB and how is it used in a RAG pipeline?",
+    "relevant_chunk_ids": [
+      "chromadb.txt_chunk_0",
+      "chromadb.txt_chunk_1",
+      "chromadb.txt_chunk_2",
+      "chromadb.txt_chunk_3"
+    ],
+    "expected_keywords": ["ChromaDB", "vector database", "embeddings", "collection", "similarity search", "ingestion"],
+    "reference": "ChromaDB is an open-source vector database that stores and indexes embeddings for fast similarity search. In a RAG pipeline it is used as the vector store: embedded document chunks are upserted into a ChromaDB collection during ingestion, and at query time the collection is searched with an embedded query vector to retrieve the most relevant chunks."
+  },
+  {
+    "query": "What are text embeddings and why are they used in RAG?",
+    "relevant_chunk_ids": [
+      "embeddings.txt_chunk_0",
+      "embeddings.txt_chunk_1",
+      "rag.txt_chunk_2"
+    ],
+    "expected_keywords": ["embeddings", "vector", "semantic", "distance", "neural", "cosine", "similarity"],
+    "reference": "Text embeddings are dense numerical vector representations of text produced by a neural encoder model. In RAG they are used to convert both document chunks and user queries into the same vector space so that semantic similarity can be measured via distance metrics such as cosine similarity or L2 distance, enabling the retrieval of contextually relevant chunks."
+  },
+  {
+    "query": "What is sliding window chunking and what do chunk_size and chunk_overlap control?",
+    "relevant_chunk_ids": [
+      "chunking.txt_chunk_1",
+      "chunking.txt_chunk_2",
+      "chunking.txt_chunk_3"
+    ],
+    "expected_keywords": ["sliding window", "chunk_size", "chunk_overlap", "overlap", "context", "characters"],
+    "reference": "Sliding window chunking splits a document into overlapping fixed-size segments. chunk_size sets the maximum number of characters in each chunk, while chunk_overlap specifies how many characters are shared between consecutive chunks. The overlap preserves context across chunk boundaries so that information at the edge of one chunk is not lost."
+  },
+  {
+    "query": "What does the retriever module do and what is top_k?",
+    "relevant_chunk_ids": [
+      "retriever.txt_chunk_0",
+      "retriever.txt_chunk_3",
+      "retriever.txt_chunk_4",
+      "retriever.txt_chunk_7",
+      "retriever.txt_chunk_8"
+    ],
+    "expected_keywords": ["retriever", "query", "ChromaDB", "top_k", "distance", "chunks", "embed"],
+    "reference": "The retriever module embeds a user query using the same encoder model used during ingestion, then queries the ChromaDB vector store to find the most similar stored chunks. top_k is the parameter that controls how many of the closest-matching chunks are returned, ranked by ascending embedding distance."
+  },
+  {
+    "query": "What is a reranker and how does it improve retrieval quality?",
+    "relevant_chunk_ids": [
+      "reranking.txt_chunk_0",
+      "reranking.txt_chunk_2",
+      "reranking.txt_chunk_3",
+      "reranking.txt_chunk_6"
+    ],
+    "expected_keywords": ["reranker", "cross-encoder", "relevance", "scoring", "reranking", "candidate"],
+    "reference": "A reranker is a cross-encoder model that jointly scores a (query, passage) pair to produce a fine-grained relevance score. Unlike bi-encoder retrieval which compares independently embedded vectors, the cross-encoder sees both texts together, giving more accurate relevance signals. Reranking is applied after initial retrieval to reorder the candidate chunks and surface the most relevant ones."
+  },
+  {
+    "query": "What is the difference between a bi-encoder and a cross-encoder in retrieval?",
+    "relevant_chunk_ids": [
+      "embeddings.txt_chunk_6",
+      "reranking.txt_chunk_1",
+      "reranking.txt_chunk_2"
+    ],
+    "expected_keywords": ["bi-encoder", "cross-encoder", "cosine", "relevance", "reranking", "scalable", "dot product"],
+    "reference": "A bi-encoder independently encodes the query and each document into separate vectors and measures similarity via dot product or cosine distance, making it fast and scalable for large corpora. A cross-encoder encodes the query and document together in a single forward pass, producing a more accurate relevance score but at higher computational cost, which is why cross-encoders are typically used for reranking a small candidate set retrieved by a bi-encoder."
+  },
+  {
+    "query": "What telemetry is captured in this RAG pipeline and how is it recorded?",
+    "relevant_chunk_ids": [
+      "telemetry.txt_chunk_0",
+      "telemetry.txt_chunk_3",
+      "telemetry.txt_chunk_4",
+      "telemetry.txt_chunk_5",
+      "telemetry.txt_chunk_6"
+    ],
+    "expected_keywords": ["telemetry", "latency", "spans", "trace", "wall-clock", "stages", "JSON"],
+    "reference": "The pipeline captures per-stage wall-clock latency for ingestion, chunking, embedding, retrieval, and generation. The tracer module provides context managers for real-time console logging, while the tracing module records structured spans under a shared trace ID and serializes them to JSON files in data/traces/ for offline analysis."
+  },
+  {
+    "query": "What metrics does the retrieval evaluation measure?",
+    "relevant_chunk_ids": [
+      "evaluation_metrics.txt_chunk_0",
+      "evaluation_metrics.txt_chunk_1",
+      "evaluation_metrics.txt_chunk_2",
+      "evaluation_metrics.txt_chunk_3",
+      "rag.txt_chunk_6"
+    ],
+    "expected_keywords": ["Precision@K", "Recall@K", "MRR", "Hit@K", "metrics", "retrieval", "relevant"],
+    "reference": "The retrieval evaluation measures four metrics: Precision@K (fraction of retrieved chunks that are relevant), Recall@K (fraction of relevant chunks that were retrieved), MRR or Mean Reciprocal Rank (reciprocal of the rank of the first relevant result), and Hit@K (whether at least one relevant chunk appears in the top-K results)."
+  },
+  {
+    "query": "What metrics does the generation evaluation measure and how are they scored?",
+    "relevant_chunk_ids": [
+      "evaluation_metrics.txt_chunk_4",
+      "evaluation_metrics.txt_chunk_5",
+      "evaluation_metrics.txt_chunk_6",
+      "rag.txt_chunk_6"
+    ],
+    "expected_keywords": ["faithfulness", "answer_relevance", "answer_correctness", "LLM", "judge", "hallucination"],
+    "reference": "The generation evaluation measures three metrics using an LLM-as-judge approach: Faithfulness (whether the answer is grounded in the retrieved context with no hallucinations), Answer Relevance (whether the answer addresses the question asked), and Answer Correctness (how well the answer matches a reference answer, when one is provided). All metrics are scored on a 0.0 to 1.0 scale by a Claude judge model."
+  },
+  {
+    "query": "What is the role of the pipeline.py orchestrator?",
+    "relevant_chunk_ids": [],
+    "expected_keywords": ["pipeline", "orchestrator", "ingest", "retrieve", "generate", "PipelineResult"],
+    "reference": "pipeline.py is the end-to-end orchestrator that ties together all RAG pipeline stages. Its run_pipeline function optionally ingests documents from a directory, then retrieves relevant chunks for the query and passes them to the generator to produce an answer. It returns a PipelineResult TypedDict containing the answer, sources, retrieved chunks, and ingestion statistics."
+  },
+  {
+    "query": "What sentence-transformers model is used for embeddings and why?",
+    "relevant_chunk_ids": [
+      "embeddings.txt_chunk_2",
+      "embeddings.txt_chunk_3",
+      "embeddings.txt_chunk_4"
+    ],
+    "expected_keywords": ["all-MiniLM-L6-v2", "sentence-transformers", "384", "CPU", "embeddings", "speed"],
+    "reference": "The default embedding model is all-MiniLM-L6-v2 from the sentence-transformers library. It was chosen for its balance of speed and quality: it produces 384-dimensional embeddings that capture semantic meaning well while being lightweight enough to run efficiently on CPU, making it practical for local RAG pipelines without requiring a GPU."
+  }
+]

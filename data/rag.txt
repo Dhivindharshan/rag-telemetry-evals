@@ -1,0 +1,35 @@
+RAG: Retrieval-Augmented Generation
+
+Retrieval-Augmented Generation (RAG) is an AI architecture pattern that enhances large language model (LLM) outputs by grounding them in externally retrieved knowledge. Instead of relying solely on the knowledge baked into model weights at training time, RAG retrieves relevant documents at query time and injects them into the LLM prompt as context.
+
+Why RAG?
+
+Large language models have a training data cutoff and a fixed context window. They cannot access private or proprietary knowledge, and they can hallucinate when asked about specific facts they were not trained on. RAG solves these problems by giving the model a dynamic, updatable external knowledge source to draw from.
+
+RAG Pipeline Stages
+
+1. Document ingestion: source documents (PDFs, text files, HTML pages, database records) are loaded and split into chunks. Each chunk is small enough to fit within context budgets while large enough to contain coherent information.
+
+2. Embedding: each chunk is converted into a dense numerical vector by an embedding model such as all-MiniLM-L6-v2. The embedding captures the semantic meaning of the text, enabling similarity-based search.
+
+3. Vector storage: embeddings and their associated text chunks are stored in a vector database such as ChromaDB, Pinecone, Weaviate, or Qdrant. The database indexes vectors for fast approximate nearest-neighbor (ANN) search.
+
+4. Query processing: at inference time, the user query is embedded using the same model used during ingestion. The query vector is then compared against stored vectors to find the most similar chunks.
+
+5. Retrieval: the top-k most similar chunks are fetched from the vector store. Optionally, a reranker refines the ranking using a cross-encoder to surface the highest-quality context.
+
+6. Augmented generation: the retrieved chunks are concatenated with the query and passed to the LLM as a structured prompt. The model generates an answer grounded in the provided context.
+
+Advanced RAG Techniques
+
+Naive RAG (simple retrieve-then-generate) can be improved with several techniques:
+
+- HyDE (Hypothetical Document Embedding): generate a hypothetical answer to embed as the query, improving retrieval when queries are short or ambiguous.
+- Query expansion: rewrite the query into multiple variants to broaden recall.
+- Re-ranking: apply a cross-encoder to reorder retrieved chunks by relevance.
+- Contextual compression: extract only the relevant sentences from each retrieved chunk before passing to the LLM.
+- Multi-hop retrieval: iterate retrieval across multiple rounds when the answer requires synthesizing information from several documents.
+
+RAG Evaluation
+
+RAG systems are evaluated on two dimensions: retrieval quality (did the right chunks get retrieved?) and generation quality (is the answer faithful to the context and accurate?). Common metrics include Precision@K, Recall@K, MRR for retrieval, and faithfulness, answer relevance, and answer correctness for generation.

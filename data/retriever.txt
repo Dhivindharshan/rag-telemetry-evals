@@ -1,0 +1,60 @@
+The Retriever Module in a RAG Pipeline
+
+The retriever is the component responsible for fetching the most relevant knowledge chunks from the vector store at query time. In this project the retriever is implemented in src/retriever.py. It bridges the vector database (ChromaDB) and the generator (LLM), ensuring the language model receives focused, relevant context rather than the entire knowledge base.
+
+How the Retriever Works
+
+When a user submits a query, the retriever performs four steps in sequence:
+
+1. Query embedding: the raw query string is encoded by the same sentence-transformers model used during document ingestion (default: all-MiniLM-L6-v2). This produces a dense query vector of the same dimensionality as the stored chunk vectors (384 dimensions for all-MiniLM-L6-v2). Using the identical model for both ingestion and retrieval is critical — mismatched models produce incompatible vector spaces and degrade retrieval quality to near-random.
+
+2. Vector similarity search: the query vector is compared against all stored chunk vectors in the ChromaDB collection using L2 (Euclidean) distance. ChromaDB's HNSW index makes this approximate nearest-neighbor search fast even over tens of thousands of chunks. Smaller L2 distances indicate greater semantic similarity between the query and the chunk.
+
+3. Top-k selection: the search returns the top_k chunks ranked by ascending distance — the closest (most similar) chunks first. The default value is top_k=3, meaning three chunks are returned. top_k is a key tunable parameter: larger values increase the chance of capturing all relevant context (higher recall) but also risk including irrelevant chunks that confuse the generator (lower precision).
+
+4. Result packaging: each result is returned as a RetrievedChunk TypedDict containing chunk_id (the unique identifier), source (the original file path), text (the raw chunk content), and distance (the L2 similarity score). The list is ordered from most to least relevant by distance.
+
+The retrieve() Function
+
+The public API is a single function:
+
+    def retrieve(
+        query: str,
+        top_k: int = 3,
+        model_name: str = DEFAULT_MODEL,
+        db_dir: Path = _DB_DIR,
+    ) -> list[RetrievedChunk]:
+
+It raises ValueError if the query is empty or if the ChromaDB collection is empty, and OSError if the embedding model cannot be loaded. These guards ensure failure modes are explicit rather than silent.
+
+Vector Similarity Search
+
+Vector similarity search compares a query vector to every stored document vector and returns the closest matches. In semantic search, closeness in vector space corresponds to similarity in meaning, not keyword overlap.
+
+The L2 distance between two vectors u and v is the square root of the sum of squared differences across all dimensions. In practice, for normalized vectors, L2 distance and cosine distance produce equivalent rankings. ChromaDB normalizes vectors internally, so the returned distances behave like cosine distances.
+
+A distance of 0.0 means the vectors are identical. Distances below 0.5 typically indicate high semantic similarity; distances above 1.2 often indicate weak relevance. Monitoring the distribution of retrieval distances is a useful telemetry signal: consistently high distances suggest the query topic is not covered by the knowledge base.
+
+top_k and Its Impact
+
+top_k controls the number of chunks passed to the language model as context. Choosing top_k involves a tradeoff:
+
+- Too small (top_k=1): risks missing relevant information if the single best chunk is incomplete.
+- Too large (top_k=10+): floods the LLM context window with marginal or irrelevant chunks, increasing cost and potentially degrading answer quality.
+- Typical default (top_k=3): balances precision and recall for most use cases.
+
+When a reranker is used, it is common to over-retrieve with a larger top_k (e.g. top_k=10) and then rerank down to the top 3. This improves recall at the retrieval stage while preserving precision at the context-passing stage.
+
+Retrieved Chunks and Context Passing
+
+After retrieval, the list of RetrievedChunk objects is passed to the generator. The generator's build_context() function concatenates the chunk texts into a numbered context block:
+
+    [1] (source: data/mlops.txt)
+    MLOps combines Machine Learning, DevOps...
+
+    [2] (source: data/rag.txt)
+    RAG systems retrieve relevant documents...
+
+This formatted context block is inserted into the prompt template alongside the user query. The LLM is instructed to answer using only the provided context, which grounds the response and prevents hallucination.
+
+The quality of the generated answer is directly bounded by retrieval quality: if the retriever fails to surface a relevant chunk, the generator cannot produce a correct answer regardless of its capability. This is why retrieval evaluation metrics such as Recall@K and Hit@K are tracked separately from generation metrics.

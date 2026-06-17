@@ -1,0 +1,44 @@
+Text Chunking for RAG Pipelines
+
+Chunking is the process of splitting large documents into smaller segments before embedding and storing them in a vector database. It is a critical preprocessing step in RAG pipelines because embedding models have a maximum token limit and vector search is more accurate when chunks are semantically coherent and roughly uniform in size.
+
+Why Chunking Matters
+
+A 50-page PDF cannot be embedded as a single unit — embedding models cap out at 256 to 512 tokens depending on the model. Even if a model could handle a full document, the resulting embedding would average out the meaning of the entire document and lose the ability to pinpoint specific facts.
+
+Smaller, focused chunks allow the retriever to surface precise, relevant passages rather than entire documents, making the LLM's context window more informative.
+
+Sliding Window Chunking
+
+The most common chunking strategy is sliding window (or fixed-size overlap) chunking. Two parameters control the output:
+
+- chunk_size: the maximum number of characters (or tokens) in each chunk. A chunk_size of 500 characters produces chunks of roughly 100–125 tokens, well within the limits of most embedding models.
+
+- chunk_overlap: the number of characters shared between consecutive chunks. An overlap of 50 characters ensures that sentences at the boundary of one chunk also appear in the beginning of the next chunk, preventing context loss at boundaries.
+
+For a document of length L, the step size is (chunk_size - chunk_overlap). The number of chunks produced is approximately ceil((L - chunk_overlap) / step).
+
+Example with chunk_size=500 and chunk_overlap=50:
+- Step = 450 characters
+- A 2000-character document produces approximately 5 chunks
+- Each chunk overlaps 50 characters with its neighbor
+
+Chunking Strategies
+
+1. Fixed-size character chunking (sliding window): simple and predictable. Works well for dense prose. Implemented in chunking.py.
+
+2. Token-based chunking: splits on token boundaries using a tokenizer. More accurate for models with strict token limits.
+
+3. Sentence-aware chunking: splits at sentence boundaries to avoid cutting mid-sentence. Preserves grammatical coherence at the cost of variable chunk sizes.
+
+4. Recursive character splitting: tries to split on paragraphs first, then sentences, then words, then characters. Produces semantically meaningful chunks while respecting a size limit. Used by LangChain's RecursiveCharacterTextSplitter.
+
+5. Semantic chunking: uses embedding similarity to detect topic shifts and split at natural semantic boundaries. Produces variable-length chunks that align with the document's structure.
+
+Chunk ID Design
+
+Each chunk should have a unique, deterministic ID derived from the source document and its position. A common pattern is {document_id}_chunk_{index}. Deterministic IDs enable idempotent upserts: re-running the pipeline with the same document produces the same chunk IDs and updates rather than duplicates the entries in the vector store.
+
+Choosing Chunk Size
+
+Smaller chunks (200–300 characters) improve retrieval precision but increase the number of chunks and may fragment ideas. Larger chunks (800–1000 characters) preserve more context but reduce retrieval specificity. A chunk size of 400–600 characters is a practical starting point for most RAG use cases.

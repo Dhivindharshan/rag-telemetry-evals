@@ -1,0 +1,60 @@
+ChromaDB: Open-Source Vector Database
+
+ChromaDB is an open-source AI-native vector database designed for storing, indexing, and querying embeddings. It is built specifically for use in LLM applications such as RAG pipelines, semantic search, and recommendation systems. ChromaDB can run fully in-memory, as a persistent local database, or as a client-server deployment.
+
+Core Concepts
+
+Collection: the primary organizational unit in ChromaDB. A collection holds documents, their vector embeddings, optional metadata, and IDs. Collections are analogous to tables in a relational database.
+
+Document: the raw text associated with an embedding. ChromaDB stores the original text alongside the vector so that results can be returned with their content, not just their IDs.
+
+Embedding: the vector representation of a document. ChromaDB accepts pre-computed embeddings or can compute them internally using a configured embedding function.
+
+Metadata: arbitrary key-value pairs attached to each entry. Metadata supports filtering during queries — for example, retrieving only chunks whose source field matches a specific file.
+
+Persistent Client
+
+ChromaDB's PersistentClient stores data on disk using SQLite for metadata and an HNSW (Hierarchical Navigable Small World) index for the vectors. This makes retrieval fast even for large collections.
+
+    import chromadb
+    client = chromadb.PersistentClient(path="./data/chroma_db")
+    collection = client.get_or_create_collection(name="rag_documents")
+
+The HNSW index is an approximate nearest-neighbor structure that trades a small amount of accuracy for significant speed gains, making it suitable for real-time retrieval over millions of vectors.
+
+Upserting Documents
+
+ChromaDB supports upsert operations, which insert new documents and update existing ones in a single call. This makes repeated ingestion pipelines idempotent.
+
+    collection.upsert(
+        ids=["chunk_1", "chunk_2"],
+        embeddings=[[0.1, 0.2, ...], [0.3, 0.4, ...]],
+        documents=["text of chunk 1", "text of chunk 2"],
+        metadatas=[{"source": "file.txt"}, {"source": "file.txt"}]
+    )
+
+Querying
+
+Vector queries return the top-k nearest neighbors to a query embedding along with their documents, metadata, and distances.
+
+    results = collection.query(
+        query_embeddings=[query_vector],
+        n_results=3,
+        include=["documents", "metadatas", "distances"]
+    )
+
+Metadata filtering can be combined with vector search to narrow results before ranking:
+
+    results = collection.query(
+        query_embeddings=[query_vector],
+        n_results=3,
+        where={"source": "mlops.txt"}
+    )
+
+Distances in ChromaDB
+
+ChromaDB returns L2 (Euclidean) distances by default. A distance of 0 means identical vectors; smaller values indicate higher similarity. Distance can be converted to cosine similarity using the relationship: cosine_similarity = 1 - (L2^2 / 2) for normalized vectors.
+
+Deployment Options
+
+ChromaDB supports three deployment modes: in-process (default for prototyping), persistent client (for local production use), and HTTP client connecting to a running ChromaDB server (for team-shared or cloud deployments).

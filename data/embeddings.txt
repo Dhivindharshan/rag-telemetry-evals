@@ -1,0 +1,39 @@
+Text Embeddings for Semantic Search
+
+Text embeddings are dense numerical vector representations of text. An embedding model encodes a piece of text — a word, sentence, paragraph, or document — into a fixed-length vector of floating-point numbers, typically between 128 and 1536 dimensions depending on the model.
+
+How Embeddings Capture Meaning
+
+Embedding models are trained so that semantically similar texts produce vectors that are close together in the vector space. Closeness is measured using cosine similarity or Euclidean (L2) distance. For example, the embeddings of "What is machine learning?" and "Explain ML" will be much closer to each other than to "What is the capital of France?".
+
+This property makes embeddings the foundation of semantic search: instead of matching keywords, the system retrieves documents whose meaning is similar to the query.
+
+Popular Embedding Models
+
+- all-MiniLM-L6-v2: a lightweight 384-dimensional model from the sentence-transformers library. It runs efficiently on CPU, making it ideal for local and self-hosted RAG pipelines. It was distilled from a larger model and achieves strong semantic similarity scores relative to its size.
+
+- all-mpnet-base-v2: a 768-dimensional model from sentence-transformers with higher quality than MiniLM at the cost of slower inference.
+
+- text-embedding-3-small and text-embedding-3-large: OpenAI's embedding models, accessed via API. The large variant produces 3072-dimensional embeddings and achieves state-of-the-art performance on MTEB benchmarks.
+
+- BGE (BAAI General Embedding): a family of high-quality open-source embedding models from the Beijing Academy of AI, available in multiple sizes.
+
+Sentence-Transformers Library
+
+The sentence-transformers Python library provides a unified interface to hundreds of pre-trained embedding models. The primary class is SentenceTransformer. Usage:
+
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    embeddings = model.encode(["text one", "text two"])
+
+The encode() method returns a numpy array of shape (n_texts, embedding_dim). It supports batching, GPU acceleration, and progress bars.
+
+Embedding Dimensions and Storage
+
+Higher-dimensional embeddings capture more nuance but consume more storage and compute. A 384-dimensional float32 vector requires 1.5 KB. One million vectors occupy about 1.5 GB. Quantization (converting float32 to int8) reduces storage by 4x with minimal quality loss.
+
+Bi-Encoder vs Cross-Encoder
+
+Embedding models used in retrieval are bi-encoders: they encode the query and each document independently, allowing pre-computation of document embeddings. This makes retrieval fast but limits relevance accuracy because the two texts never interact directly.
+
+Cross-encoders process the query and document together, allowing full attention across both texts and producing more accurate relevance scores. Cross-encoders are too slow for first-stage retrieval over large corpora but are used for reranking a small candidate set.

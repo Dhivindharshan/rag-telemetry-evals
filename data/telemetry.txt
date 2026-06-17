@@ -1,0 +1,41 @@
+Telemetry and Observability in RAG Pipelines
+
+Telemetry is the automated collection, measurement, and transmission of data about a running system. In RAG pipelines, telemetry covers latency, throughput, token usage, error rates, and quality signals at each stage of the pipeline. Good telemetry is essential for identifying bottlenecks, debugging failures, and ensuring the pipeline meets latency SLAs in production.
+
+Key Telemetry Signals
+
+Latency: the time each pipeline stage takes to complete. Measured as wall-clock time using high-resolution timers (Python's time.perf_counter()). Tracked per stage — ingestion, chunking, embedding, retrieval, and generation — to pinpoint which stage is slowest.
+
+Token usage: the number of input and output tokens consumed by each LLM call. Token counts directly determine API cost and affect context window utilization.
+
+Retrieval distance: the embedding distance scores returned by the vector store for retrieved chunks. Consistently high distances indicate that the query has no close match in the knowledge base, which often predicts poor generation quality.
+
+Error rate: the fraction of pipeline runs that fail at each stage. High error rates in embedding or LLM calls may signal API instability or quota exhaustion.
+
+Model and configuration metadata: which embedding model, chunk size, top_k, and LLM model were used for a given run. This is essential for correlating configuration changes with quality shifts.
+
+Spans and Traces
+
+Modern observability systems model telemetry as traces and spans. A trace represents a single end-to-end pipeline run. Each stage within the run is a span with a start time, end time, duration, status (ok or error), and optional error message.
+
+Spans are collected under a shared trace_id (typically a UUID) so that all stages of a run can be grouped and analyzed together. This structure is compatible with OpenTelemetry, Jaeger, and Zipkin.
+
+In this project, the SpanRecorder class in telemetry/tracing.py implements this pattern. It collects spans across pipeline stages and serializes completed traces to JSON files in data/traces/.
+
+Console Logging with tracer.py
+
+The telemetry/tracer.py module provides lightweight context managers for real-time console logging. Each context manager wraps a pipeline stage, starts a timer on entry, and logs the elapsed time and status on exit.
+
+    with trace_retrieval():
+        chunks = retrieve(query, top_k=3)
+    # logs: [retrieval] completed in 0.0312s
+
+On exception, the context manager logs the error and elapsed time before re-raising, ensuring that failures are always surfaced in the log stream.
+
+Structured Trace Output
+
+Structured JSON traces written by tracing.py support offline analysis. Each trace file contains the trace_id, query, total_duration_s, and a list of spans each with stage, duration_s, status, and error. This format can be imported into analytics tools, visualization dashboards, or MLflow as artifacts for experiment tracking.
+
+Telemetry Best Practices
+
+Measure every stage independently so that latency regressions can be attributed to the correct component. Always record the model name and configuration parameters alongside metrics so that comparisons across runs are meaningful. Store traces persistently so that production incidents can be reconstructed after the fact.
