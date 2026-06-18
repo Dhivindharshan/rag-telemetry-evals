@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Build Verification
+#
+# Builds the production Docker image on every push and PR to main.
+# Does NOT push to any registry — this is a build-correctness gate only.
+#
+# Key details:
+#   - Docker BuildKit + GitHub Actions layer cache (type=gha) means the
+#     ~200 MB CPU torch layer is downloaded only once, then cached.
+#   - First build: ~10 min.  Subsequent builds (cache hit): ~2 min.
+#   - push: false  — verification only; image is never stored externally.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel any in-progress run when a newer commit arrives on the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build:
+    name: Docker Build Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # BuildKit is required for the type=gha cache driver.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # cache-from: type=gha   — read cached layers from GitHub Actions cache
+      # cache-to:   type=gha   — write new/updated layers back to cache
+      # mode=max               — cache intermediate layers, not just the final image.
+      #                          Critical here because the Dockerfile has two pip
+      #                          install steps (torch first, then requirements.txt)
+      #                          and mode=max caches both independently.
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: rag-telemetry-evals:ci-${{ github.run_number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
