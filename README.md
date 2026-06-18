@@ -199,14 +199,8 @@ curl http://localhost:8000/health
 ```bash
 
 python evals/run_evals.py --mode retrieval --top-k 3
-
-
 python evals/run_evals.py --mode generation --top-k 3
-
-
 python evals/run_evals.py --mode retrieval-compare --top-k 3 --pool-factor 2
-
-
 python evals/run_evals.py --mode all --top-k 3
 ```
 
@@ -217,7 +211,6 @@ Results are saved to `data/eval_results/` and logged to MLflow automatically.
 ## MLflow
 
 ```bash
-# Launch the MLflow UI to explore experiment runs
 mlflow ui
 
 # Open http://localhost:5000
