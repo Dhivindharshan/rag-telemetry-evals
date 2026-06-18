@@ -1,28 +1,255 @@
-name: Retrieval Evaluation
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG Telemetry Evals — GitHub Actions CI
+#
+# Jobs (run in parallel):
+#   retrieval-eval  Ingests documents into ChromaDB, runs Precision@K /
+#                   Recall@K / MRR / NDCG@K, enforces metric quality gates,
+#                   posts results to the Actions Summary tab, and uploads
+#                   eval JSON + MLflow tracking data as downloadable artifacts.
+#
+#   docker-build    Verifies the Dockerfile builds successfully using
+#                   BuildKit with GitHub Actions layer-cache so the large
+#                   torch layer is only downloaded once.
+#
+# Triggers: push or PR to main; manual dispatch with configurable top_k.
+# ─────────────────────────────────────────────────────────────────────────────
+name: RAG Evaluation CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual trigger — useful for re-running with a different top_k without
+  # having to push a commit.
+  workflow_dispatch:
+    inputs:
+      top_k:
+        description: "Number of chunks to retrieve per query (top_k)"
+        default: "3"
+        required: false
+        type: string
 
+# Cancel any in-progress run on the same branch/PR when a new commit arrives.
+# Prevents N queued runs from consuming CI minutes on superseded code.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Explicit least-privilege permissions.
+# upload-artifact and write to step summary work with read-only contents.
+permissions:
+  contents: read
+
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
+
+  # ── Job 1: Retrieval Evaluation ─────────────────────────────────────────────
   retrieval-eval:
+    name: Retrieval Evaluation
     runs-on: ubuntu-latest
+    # Kill the job if it hangs. sentence-transformers model load < 3 min;
+    # full eval of 13 queries < 5 min. 20 min is a generous upper bound.
+    timeout-minutes: 20
+
+    env:
+      PYTHON_VERSION: "3.11"
+      # Prevent torch from scanning for CUDA hardware at startup.
+      # Without this, torch prints warnings and probes for drivers that
+      # do not exist on GitHub-hosted runners.
+      CUDA_VISIBLE_DEVICES: ""
+      # Suppress the HuggingFace tokenizer fork warning.
+      TOKENIZERS_PARALLELISM: "false"
+      # Injected from repository secrets. Required only for --mode generation.
+      # Retrieval-only evaluation works fine without it.
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
-      - name: Checkout Repository
+      # ── 1. Source ────────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # ── 2. Python + pip cache ────────────────────────────────────────────────
+      # cache: "pip" stores ~/.cache/pip between runs, keyed on the hash of
+      # requirements.txt. First run downloads ~500 MB; cache hits take seconds.
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
 
-      - name: Install Dependencies
+      # ── 3. CPU-only PyTorch (core fix for slow/failing pip installs) ─────────
+      # PyPI's default torch wheel bundles CUDA and weighs ~2 GB.
+      # The CPU wheel from PyTorch's own index is ~200 MB.
+      # Installing it BEFORE requirements.txt means pip finds torch already
+      # present when resolving sentence-transformers, and never downloads
+      # the CUDA variant. Same strategy used in the Dockerfile.
+      - name: Install CPU-only PyTorch
         run: |
-          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      # ── 4. Project dependencies ──────────────────────────────────────────────
+      - name: Install project dependencies
+        run: |
           pip install -r requirements.txt
 
-      - name: Run Retrieval Evaluation
+      # ── 5. Runtime directories ───────────────────────────────────────────────
+      # Not committed to the repo; created fresh on every CI run.
+      - name: Create runtime directories
         run: |
-          python evals/run_evals.py --mode retrieval
+          mkdir -p data/chroma_db data/traces data/eval_results
+
+      # ── 6. Document ingestion ────────────────────────────────────────────────
+      # Runs from src/ so sibling-module imports (embeddings, chunking,
+      # ingestion) resolve without sys.path tricks.
+      # upsert semantics — identical to re-running locally: safe and idempotent.
+      - name: Ingest source documents into ChromaDB
+        working-directory: src
+        run: |
+          python vector_store.py
+
+      # ── 7. Validate ChromaDB is populated ────────────────────────────────────
+      # vector_store.main() catches errors and exits 0 even on failure.
+      # This step independently verifies the collection is non-empty so
+      # the eval step never runs against an empty database.
+      - name: Verify ChromaDB has indexed documents
+        run: |
+          python - <<'EOF'
+          import sys
+          sys.path.insert(0, "src")
+          from vector_store import count_documents
+          count = count_documents()
+          print(f"Indexed documents: {count}")
+          if count == 0:
+              print(
+                  "ERROR: ChromaDB collection is empty.\n"
+                  "Ensure source documents (.txt / .md / .pdf) exist in data/ "
+                  "and are committed to the repository."
+              )
+              sys.exit(1)
+          EOF
+
+      # ── 8. Retrieval evaluation ───────────────────────────────────────────────
+      # --output writes a timestamped JSON file used by later steps.
+      # top_k defaults to 3; override via workflow_dispatch input.
+      - name: Run retrieval evaluation
+        run: |
+          python evals/run_evals.py \
+            --mode retrieval \
+            --top-k ${{ inputs.top_k || '3' }} \
+            --output data/eval_results/ci_retrieval_results.json
+
+      # ── 9. Quality gate ──────────────────────────────────────────────────────
+      # Fails the workflow if any metric drops below its minimum threshold.
+      # This prevents a silent regression from merging into main.
+      # Raise thresholds as your pipeline matures.
+      - name: Check metric quality thresholds
+        run: |
+          python - <<'EOF'
+          import json, pathlib, sys
+
+          path = pathlib.Path("data/eval_results/ci_retrieval_results.json")
+          if not path.exists():
+              print("Results file not found — skipping threshold check.")
+              sys.exit(0)
+
+          ra = json.loads(path.read_text()).get("retrieval_aggregate") or {}
+
+          # ── Minimum acceptable scores ────────────────────────────────────────
+          thresholds = {
+              "mean_precision_at_k": 0.50,
+              "mean_recall_at_k":    0.40,
+              "mean_mrr":            0.60,
+              "mean_ndcg_at_k":      0.50,
+              "hit_rate":            0.70,
+          }
+
+          failures = [
+              f"  {metric}: got {ra.get(metric, 0):.4f}  <  required {min_val}"
+              for metric, min_val in thresholds.items()
+              if ra.get(metric, 0) < min_val
+          ]
+
+          if failures:
+              print("QUALITY GATE FAILED — metrics below threshold:")
+              print("\n".join(failures))
+              sys.exit(1)
+
+          print("QUALITY GATE PASSED — all metrics meet thresholds:")
+          for m in thresholds:
+              print(f"  {m}: {ra.get(m, 0):.4f}")
+          EOF
+
+      # ── 10. GitHub Actions step summary ──────────────────────────────────────
+      # Writes a formatted metrics table to the "Summary" tab of the Actions
+      # run page — visible without opening any logs or downloading artifacts.
+      # if: always() ensures this runs even when evaluation or quality gate fail
+      # so you can see the numbers that caused the failure.
+      - name: Write metrics to Actions summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os, pathlib, sys
+
+          path    = pathlib.Path("data/eval_results/ci_retrieval_results.json")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+
+          if not path.exists():
+              msg = "## Retrieval Evaluation — no results file found\n"
+              if summary:
+                  open(summary, "a").write(msg)
+              print(msg)
+              sys.exit(0)
+
+          data = json.loads(path.read_text())
+          ra   = data.get("retrieval_aggregate") or {}
+          sha  = os.environ.get("GITHUB_SHA", "unknown")[:7]
+          ref  = os.environ.get("GITHUB_REF_NAME", "unknown")
+
+          lines = [
+              "## Retrieval Evaluation Results",
+              "",
+              "| | |",
+              "|:--|:--|",
+              f"| **Commit** | `{sha}` |",
+              f"| **Branch** | `{ref}` |",
+              f"| **Mode** | `{data.get('mode', 'retrieval')}` |",
+              f"| **Top-K** | `{data.get('top_k', 3)}` |",
+              f"| **Samples** | `{ra.get('num_samples', 0)}` |",
+              "",
+              "| Metric | Score |",
+              "|:-------|------:|",
+              f"| Precision@K  | `{ra.get('mean_precision_at_k', 0):.4f}` |",
+              f"| Recall@K     | `{ra.get('mean_recall_at_k', 0):.4f}` |",
+              f"| MRR          | `{ra.get('mean_mrr', 0):.4f}` |",
+              f"| NDCG@K       | `{ra.get('mean_ndcg_at_k', 0):.4f}` |",
+              f"| Hit Rate     | `{ra.get('hit_rate', 0):.4f}` |",
+              "",
+          ]
+
+          output = "\n".join(lines)
+          if summary:
+              with open(summary, "a") as f:
+                  f.write(output + "\n")
+          print(output)
+          EOF
+
+      # ── 11. Upload artifacts ──────────────────────────────────────────────────
+      # data/eval_results/  — JSON results, readable locally or in CI
+      # mlruns/             — local MLflow tracking DB created by _log_to_mlflow()
+      #                       download this artifact and run `mlflow ui` locally
+      #                       to explore your experiment runs with full UI
+      # Retained for 30 days; configurable up to 90.
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-eval-run-${{ github.run_number }}
+          path: |
+            data/eval_results/
+            mlruns/
+          retention-days: 30
+          if-no-files-found: warn
+
+

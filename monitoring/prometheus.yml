@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s      # how often to scrape targets
+  evaluation_interval: 15s  # how often to evaluate rules
+  scrape_timeout: 10s
+
+scrape_configs:
+  # ── RAG API ──────────────────────────────────────────────────────────────────
+  # "api" resolves to the api service in docker-compose.
+  # /metrics returns prometheus_client's generate_latest() output.
+  - job_name: rag-api
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # ── Prometheus self-monitoring ────────────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

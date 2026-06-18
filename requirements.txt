@@ -28,3 +28,6 @@ PyYAML>=6.0.0
 
 # Experiment tracking
 mlflow>=2.15.0
+
+# Observability
+prometheus-client>=0.20.0

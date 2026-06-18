@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG Telemetry & Evals — Full observability stack
+#
+# Services:
+#   api         FastAPI + RAG pipeline (port 8000)
+#   prometheus  Metrics scraper (port 9090)
+#   grafana     Dashboards (port 3000)
+#
+# Quick start:
+#   1. cp .env.example .env && edit .env (add GEMINI_API_KEY)
+#   2. Ingest documents once:
+#        docker compose run --rm api python src/vector_store.py
+#   3. Start the stack:
+#        docker compose up
+#   4. Open:
+#        API:        http://localhost:8000/docs
+#        Metrics:    http://localhost:8000/metrics
+#        Prometheus: http://localhost:9090
+#        Grafana:    http://localhost:3000  (admin / admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── RAG API ──────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # GEMINI_API_KEY is read from the .env file in the project root.
+      # It is NEVER baked into the image — always passed at runtime.
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TOKENIZERS_PARALLELISM=false
+      - CUDA_VISIBLE_DEVICES=
+    volumes:
+      # Persist ChromaDB data across container restarts.
+      - chroma-data:/app/data/chroma_db
+      # Persist MLflow experiment runs.
+      - mlruns-data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+    depends_on: []
+
+  # ── Prometheus ────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # Retain 15 days of metrics.
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # ── Grafana ───────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      # Default credentials — change in production.
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Disable sign-up for a private portfolio project.
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Preload the Prometheus datasource and RAG dashboard automatically.
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      # Datasource and dashboard provisioning configs.
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON files.
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Persist Grafana state (user settings, annotations, etc.).
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  chroma-data:
+    driver: local
+  mlruns-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
