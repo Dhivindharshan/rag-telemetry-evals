@@ -267,3 +267,13 @@ Evaluation results JSON and the MLflow tracking database are uploaded as downloa
 | `GEMINI_API_KEY` | For generation | Google Gemini API key |
 
 Copy `.env.example` to `.env` and fill in your values. The `.env` file is excluded from git and Docker image builds.
+
+## MLflow Experiment Tracking
+
+### Experiment Overview
+
+![MLflow Experiment](docs/images/mlflow-experiment-overview.png)
+
+### Run Details
+
+![MLflow Run](docs/images/mlflow-run-details.png)
