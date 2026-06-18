@@ -39,14 +39,20 @@ RUN apt-get update \
 # Changing source files later won't invalidate this layer.
 COPY requirements.txt .
 
-# Step 1 — CPU-only PyTorch.
+# Step 1 — Upgrade pip so the backtracking resolver correctly handles
+# manylinux_2_28 wheel tags (onnxruntime 1.17+, cffi 2.x, etc.).
+# python:3.11-slim ships with pip 23.x which can mis-classify these wheels,
+# causing exit code 2 on fresh resolves.
+RUN pip install --upgrade pip
+
+# Step 2 — CPU-only PyTorch.
 # PyPI's default torch wheel bundles CUDA support and weighs ~2 GB.
 # The CPU-only wheel from PyTorch's own index is ~200 MB.
 # Installing it here before the rest of requirements.txt means pip sees
 # torch as already satisfied and skips the CUDA variant entirely.
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-# Step 2 — Remaining dependencies (sentence-transformers, chromadb, fastapi,
+# Step 3 — Remaining dependencies (sentence-transformers, chromadb, fastapi,
 # mlflow, etc.).  pip reuses the CPU torch installed above.
 RUN pip install -r requirements.txt
 

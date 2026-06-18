@@ -74,6 +74,9 @@ graph TB
 | Pipeline comparison | Automated Retriever-Only vs. Retriever+Reranker A/B evaluation |
 | CI quality gate | GitHub Actions fails the build if any metric drops below threshold |
 | Containerization | CPU-only Docker image (~1.2 GB), non-root user, healthcheck |
+| Prometheus metrics | `rag_*` Counters, Gauges, and Histograms on every pipeline stage |
+| Grafana dashboards | 12-panel real-time dashboard auto-provisioned on `docker compose up` |
+| Full observability stack | `docker-compose.yml` spins up API + Prometheus + Grafana with one command |
 
 ---
 
@@ -89,6 +92,8 @@ graph TB
 | Experiment tracking | MLflow |
 | Containerization | Docker (CPU-only PyTorch, non-root, healthcheck) |
 | CI/CD | GitHub Actions (pip cache, Docker BuildKit cache, artifact upload) |
+| Metrics | prometheus-client — `rag_*` Counters / Gauges / Histograms |
+| Dashboards | Grafana 10.x — auto-provisioned datasource + 12-panel dashboard |
 | Config | Pydantic v2, python-dotenv |
 | Language | Python 3.11 |
 
@@ -146,11 +151,20 @@ rag-telemetry-evals/
 │   ├── compare_retrieval.py # Retriever vs Retriever+Reranker comparison
 │   └── golden_dataset.json  # 13-query evaluation dataset
 ├── data/                    # Source documents for ingestion
+├── monitoring/
+│   ├── prometheus.yml       # Scrape config — targets api:8000/metrics every 15 s
+│   └── grafana/
+│       ├── provisioning/    # Auto-wired datasource + dashboard on container start
+│       └── dashboards/
+│           └── rag_dashboard.json  # 12-panel RAG Pipeline Monitor
+├── docs/
+│   └── images/              # Project screenshots (MLflow, Grafana, CI)
 ├── .github/
 │   └── workflows/
 │       ├── eval.yml         # Retrieval eval CI + quality gate
 │       └── docker-build.yml # Dockerfile build verification
 ├── Dockerfile               # CPU-only production image
+├── docker-compose.yml       # Full observability stack: API + Prometheus + Grafana
 ├── requirements.txt
 └── config.yaml
 ```
@@ -187,7 +201,7 @@ curl -X POST http://localhost:8001/query \
   -d '{"query": "What is MLOps?", "top_k": 3}'
 ```
 
-### Docker
+### Docker (single container)
 
 ```bash
 # Build
@@ -201,6 +215,25 @@ docker run -p 8000:8000 \
 
 # Health check
 curl http://localhost:8000/health
+```
+
+### Docker Compose (API + Prometheus + Grafana)
+
+```bash
+# 1. Set your API key
+cp .env.example .env   # then edit .env and set GEMINI_API_KEY
+
+# 2. One-time document ingestion
+docker compose run --rm api python src/vector_store.py
+
+# 3. Start the full observability stack
+docker compose up
+
+# Services:
+#   API + Swagger:  http://localhost:8000/docs
+#   Raw metrics:    http://localhost:8000/metrics
+#   Prometheus:     http://localhost:9090
+#   Grafana:        http://localhost:3000  (admin / admin)
 ```
 
 ---
@@ -257,6 +290,61 @@ Quality gate thresholds (configurable in `eval.yml`):
 | Hit Rate | 0.70 |
 
 Evaluation results JSON and the MLflow tracking database are uploaded as downloadable artifacts on every run. Download the artifact and run `mlflow ui` locally to explore the experiment.
+
+---
+
+## Monitoring
+
+Production-style observability powered by Prometheus and Grafana, auto-provisioned on `docker compose up`.
+
+```
+Prometheus scrapes /metrics every 15 s  →  stores time-series data
+Grafana reads from Prometheus            →  renders 12-panel dashboard
+```
+
+**Tracked metrics (all prefixed `rag_`):**
+
+| Metric | Type | What it measures |
+|:-------|:-----|:-----------------|
+| `rag_requests_total` | Counter | Every HTTP request, labelled by method / endpoint / status |
+| `rag_requests_in_flight` | Gauge | Concurrent in-flight requests |
+| `rag_request_duration_seconds` | Histogram | Full wall-clock time including FastAPI overhead |
+| `rag_errors_total` | Counter | Errors by type (`ValueError`, `GeminiClientError`, …) |
+| `rag_retrieval_duration_seconds` | Histogram | ChromaDB vector search latency |
+| `rag_reranking_duration_seconds` | Histogram | Cross-encoder reranking latency |
+| `rag_generation_duration_seconds` | Histogram | Gemini API round-trip latency |
+| `rag_pipeline_duration_seconds` | Histogram | retrieval + reranking + generation combined |
+| `rag_chunks_retrieved` | Histogram | Number of chunks returned per request |
+
+**Dashboard panels:**
+- Request rate (success vs error), errors by type
+- P50 / P95 / P99 request latency and pipeline latency
+- Per-stage latency: retrieval · reranking · generation
+- Rolling average stage breakdown (identify bottlenecks at a glance)
+
+---
+
+## Project Screenshots
+
+### MLflow Experiment Tracking
+
+Experiment runs, per-request metrics (retrieval / generation / total latency), parameters, and artifact downloads.
+
+![MLflow Experiment Overview](docs/images/mlflow-experiment-overview.png)
+
+![MLflow Run Details](docs/images/mlflow-run-details.png)
+
+### Grafana Monitoring Dashboard
+
+Request rate, error rate, P50/P95/P99 latency, and stage-by-stage performance breakdown in real time.
+
+*Screenshot: run `docker compose up`, open `http://localhost:3000`, and save the dashboard view to `docs/images/grafana-dashboard.png`.*
+
+### GitHub Actions CI/CD
+
+Parallel Docker Build and Retrieval Evaluation workflows — green means the quality gate passed.
+
+![GitHub Actions CI/CD](docs/images/github-actions-success.png)
 
 ---
 
