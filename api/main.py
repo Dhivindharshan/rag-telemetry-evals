@@ -11,9 +11,11 @@ Metrics (Prometheus scrape endpoint):
     http://127.0.0.1:8001/metrics
 """
 
+import logging
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Annotated
 
@@ -23,6 +25,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from google.genai import errors as genai_errors
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s [%(name)s]: %(message)s",
+)
+_log = logging.getLogger("rag.api")
 
 # ── Environment ────────────────────────────────────────────────────────────────
 _ENV_PATH = Path(__file__).parent.parent / ".env"
@@ -239,6 +247,9 @@ def metrics() -> Response:
 def query_pipeline(request: QueryRequest) -> QueryResponse:
     t_total_start = time.perf_counter()
 
+    _log.debug("[DEBUG] POST /query  query=%r  top_k=%d  use_reranker=%s",
+               request.query, request.top_k, request.use_reranker)
+
     # ── Retrieval ──────────────────────────────────────────────────────────────
     # Fetch more candidates when reranking is enabled so the reranker has a
     # wider pool to select from. Standard practice: pool = top_k × 2.
@@ -249,14 +260,29 @@ def query_pipeline(request: QueryRequest) -> QueryResponse:
         from retriever import retrieve
         chunks = retrieve(request.query, top_k=pool_k)
     except ValueError as exc:
+        _log.error("[DEBUG] Retrieval ValueError: %s\n%s", exc, traceback.format_exc())
         ERRORS_TOTAL.labels(endpoint="/query", error_type="ValueError").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+    except Exception as exc:
+        _log.error("[DEBUG] Retrieval UNEXPECTED %s: %s\n%s",
+                   type(exc).__name__, exc, traceback.format_exc())
+        ERRORS_TOTAL.labels(endpoint="/query", error_type=type(exc).__name__).inc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Retrieval failed ({type(exc).__name__}): {exc}",
+        ) from exc
 
     t_retrieval_end = time.perf_counter()
     retrieval_seconds = t_retrieval_end - t_retrieval_start
+
+    _log.debug("[DEBUG] Retrieved %d chunks in %.3fs", len(chunks), retrieval_seconds)
+    for i, c in enumerate(chunks):
+        _log.debug("[DEBUG] chunk[%d]  id=%s  source=%s  len=%d  dist=%.4f  preview=%r",
+                   i, c["chunk_id"], c["source"], len(c["text"]),
+                   c["distance"], c["text"][:80])
 
     RETRIEVAL_DURATION_SECONDS.labels(top_k=str(pool_k)).observe(retrieval_seconds)
     CHUNKS_RETRIEVED.observe(len(chunks))
@@ -268,6 +294,7 @@ def query_pipeline(request: QueryRequest) -> QueryResponse:
     if request.use_reranker and chunks:
         t_reranking_start = time.perf_counter()
         try:
+            _log.debug("[DEBUG] Reranking %d chunks …", len(chunks))
             encoder = _get_reranker()
             pairs = [(request.query, c["text"]) for c in chunks]
             scores: list[float] = encoder.predict(pairs).tolist()
@@ -276,9 +303,13 @@ def query_pipeline(request: QueryRequest) -> QueryResponse:
             scored = sorted(zip(chunks, scores), key=lambda x: x[1], reverse=True)
             chunks = [c for c, _ in scored[: request.top_k]]
             rerank_scores = {c["chunk_id"]: float(s) for c, s in scored[: request.top_k]}
+            _log.debug("[DEBUG] Reranker scores: %s",
+                       {c["chunk_id"]: round(s, 4) for c, s in scored[: request.top_k]})
 
         except Exception as exc:
             # Reranking failure is non-fatal: fall back to retriever ordering.
+            _log.error("[DEBUG] Reranker FAILED (%s): %s\n%s",
+                       type(exc).__name__, exc, traceback.format_exc())
             ERRORS_TOTAL.labels(endpoint="/query", error_type="RerankerError").inc()
             chunks = chunks[: request.top_k]
         finally:
@@ -292,28 +323,40 @@ def query_pipeline(request: QueryRequest) -> QueryResponse:
     # ── Generation ─────────────────────────────────────────────────────────────
     t_generation_start = time.perf_counter()
 
+    _log.debug("[DEBUG] Calling generate()  chunks=%d  api_key_present=%s",
+               len(chunks), bool(_GEMINI_API_KEY))
+
     try:
         from generator import generate
         response = generate(request.query, chunks, api_key=_GEMINI_API_KEY or None)
+        _log.debug("[DEBUG] generate() returned  model=%s  answer_len=%d",
+                   response.get("model"), len(response.get("answer", "")))
     except ValueError as exc:
+        _log.error("[DEBUG] Generation ValueError: %s\n%s", exc, traceback.format_exc())
         ERRORS_TOTAL.labels(endpoint="/query", error_type="ValueError").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
     except genai_errors.ClientError as exc:
+        _log.error("[DEBUG] Gemini ClientError: %s\n%s", exc, traceback.format_exc())
         ERRORS_TOTAL.labels(endpoint="/query", error_type="GeminiClientError").inc()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Gemini API rejected the request. Check GEMINI_API_KEY. Detail: {exc}",
         ) from exc
     except genai_errors.ServerError as exc:
+        _log.error("[DEBUG] Gemini ServerError: %s\n%s", exc, traceback.format_exc())
         ERRORS_TOTAL.labels(endpoint="/query", error_type="GeminiServerError").inc()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Gemini server error: {exc}",
         ) from exc
     except Exception as exc:
+        # ── This is the 500 path ──────────────────────────────────────────────
+        # Full traceback is logged so 'docker compose logs api' shows the cause.
+        _log.error("[DEBUG] Generation UNEXPECTED %s: %s\n%s",
+                   type(exc).__name__, exc, traceback.format_exc())
         ERRORS_TOTAL.labels(endpoint="/query", error_type=type(exc).__name__).inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

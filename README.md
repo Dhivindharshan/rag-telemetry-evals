@@ -130,20 +130,20 @@ Evaluated using Gemini 2.5 Flash as an LLM-as-a-judge, scoring 0–1 per sample:
 ```
 rag-telemetry-evals/
 ├── api/
-│   └── main.py              # FastAPI app — POST /query, GET /health
+│   └── main.py              
 ├── src/
-│   ├── ingestion.py         # Document loading (PDF, TXT, MD)
-│   ├── chunking.py          # Token-aware text chunking
-│   ├── embeddings.py        # Sentence-transformers embedding
-│   ├── retriever.py         # ChromaDB semantic search
-│   ├── reranker.py          # Cross-encoder reranking
-│   ├── generator.py         # Gemini answer generation
-│   ├── pipeline.py          # End-to-end query pipeline
-│   └── vector_store.py      # ChromaDB ingestion entrypoint
+│   ├── ingestion.py         
+│   ├── chunking.py          
+│   ├── embeddings.py        
+│   ├── retriever.py         
+│   ├── reranker.py          
+│   ├── generator.py         
+│   ├── pipeline.py          
+│   └── vector_store.py      
 ├── telemetry/
-│   ├── mlflow_logger.py     # Per-request MLflow run logging
-│   ├── tracer.py            # Trace context management
-│   └── tracing.py           # Latency instrumentation
+│   ├── mlflow_logger.py     
+│   ├── tracer.py            
+│   └── tracing.py          
 ├── evals/
 │   ├── run_evals.py         # CLI entrypoint: --mode retrieval/generation/all
 │   ├── retrieval_eval.py    # P@K, R@K, MRR, NDCG@K, Hit Rate
@@ -176,26 +176,20 @@ rag-telemetry-evals/
 ### Local development
 
 ```bash
-# 1. Clone and create environment
+
 git clone https://github.com/Dhivindharshan/rag-telemetry-evals.git
 cd rag-telemetry-evals
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate  
 
-# 2. Install dependencies (CPU-only torch first to avoid 2 GB CUDA download)
+
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 
-# 3. Set environment variables
-cp .env.example .env
-# Edit .env and add: GEMINI_API_KEY=your_key_here
 
-# 4. Ingest documents
+cp .env.example .env
 cd src && python vector_store.py && cd ..
 
-# 5. Start the API
 uvicorn api.main:app --reload --port 8001
-
-# 6. Query the API
 curl -X POST http://localhost:8001/query \
   -H "Content-Type: application/json" \
   -d '{"query": "What is MLOps?", "top_k": 3}'
@@ -204,16 +198,11 @@ curl -X POST http://localhost:8001/query \
 ### Docker (single container)
 
 ```bash
-# Build
 docker build -t rag-telemetry-evals .
-
-# Run (pass API key at runtime — never bake it into the image)
 docker run -p 8000:8000 \
   -e GEMINI_API_KEY=your_key_here \
   -v rag-chroma:/app/data/chroma_db \
   rag-telemetry-evals
-
-# Health check
 curl http://localhost:8000/health
 ```
 
@@ -241,16 +230,10 @@ docker compose up
 ## Running Evaluations
 
 ```bash
-# Retrieval evaluation (no API key needed)
+
 python evals/run_evals.py --mode retrieval --top-k 3
-
-# Generation evaluation (requires GEMINI_API_KEY)
 python evals/run_evals.py --mode generation --top-k 3
-
-# Retriever vs. Retriever+Reranker comparison
 python evals/run_evals.py --mode retrieval-compare --top-k 3 --pool-factor 2
-
-# All evaluations
 python evals/run_evals.py --mode all --top-k 3
 ```
 
@@ -261,7 +244,6 @@ Results are saved to `data/eval_results/` and logged to MLflow automatically.
 ## MLflow
 
 ```bash
-# Launch the MLflow UI to explore experiment runs
 mlflow ui
 
 # Open http://localhost:5000
@@ -355,3 +337,13 @@ Parallel Docker Build and Retrieval Evaluation workflows — green means the qua
 | `GEMINI_API_KEY` | For generation | Google Gemini API key |
 
 Copy `.env.example` to `.env` and fill in your values. The `.env` file is excluded from git and Docker image builds.
+
+## MLflow Experiment Tracking
+
+### Experiment Overview
+
+![MLflow Experiment](docs/images/mlflow-experiment-overview.png)
+
+### Run Details
+
+![MLflow Run](docs/images/mlflow-run-details.png)

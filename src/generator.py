@@ -1,6 +1,8 @@
 """Answer generation module for RAG using the Google Gemini API."""
 
+import logging
 import os
+import traceback
 from pathlib import Path
 from typing import TypedDict
 
@@ -8,6 +10,8 @@ from google import genai
 from google.genai import types
 
 from retriever import RetrievedChunk, retrieve
+
+_log = logging.getLogger("rag.generator")
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "v1.txt"
@@ -116,22 +120,45 @@ def generate(
         raise ValueError("chunks is empty — cannot generate an answer without context.")
 
     resolved_key = _resolve_api_key(api_key)
+    _log.debug("[DEBUG] API key resolved  masked=%s…%s",
+               resolved_key[:4], resolved_key[-4:] if len(resolved_key) > 8 else "****")
 
     template = _load_prompt_template(prompt_path)
     context = build_context(chunks)
     prompt = template.format(context=context, question=query)
 
+    _log.debug("[DEBUG] Gemini request  model=%s  prompt_chars=%d  chunks=%d",
+               model, len(prompt), len(chunks))
+
     client = genai.Client(api_key=resolved_key)
 
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            max_output_tokens=4096,
-        ),
-    )
+    try:
+        raw_response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=4096,
+            ),
+        )
+        _log.debug("[DEBUG] Gemini raw response type=%s  candidates=%d",
+                   type(raw_response).__name__,
+                   len(raw_response.candidates) if hasattr(raw_response, "candidates") else -1)
+    except Exception as exc:
+        _log.error("[DEBUG] client.models.generate_content FAILED: %s: %s\n%s",
+                   type(exc).__name__, exc, traceback.format_exc())
+        raise
 
-    answer = (response.text or "").strip()
+    try:
+        answer = (raw_response.text or "").strip()
+        _log.debug("[DEBUG] response.text OK  answer_len=%d", len(answer))
+    except Exception as exc:
+        _log.error("[DEBUG] response.text FAILED: %s: %s\n%s",
+                   type(exc).__name__, exc, traceback.format_exc())
+        _log.error("[DEBUG] raw_response dump: candidates=%r  prompt_feedback=%r",
+                   getattr(raw_response, "candidates", "N/A"),
+                   getattr(raw_response, "prompt_feedback", "N/A"))
+        raise
+
     sources = list(dict.fromkeys(chunk["source"] for chunk in chunks))
 
     return GeneratedResponse(
